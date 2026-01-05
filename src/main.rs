@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use wgpu::{BufferDescriptor, ComputePassDescriptor, ComputePipelineDescriptor, util::{BufferInitDescriptor, DeviceExt}};
+use wgpu::{BufferDescriptor, ComputePassDescriptor, ComputePipelineDescriptor, Features, Queue, util::{BufferInitDescriptor, DeviceExt}};
 
 #[tokio::main]
 async fn main() {
@@ -23,9 +23,22 @@ async fn main() {
         usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::MAP_WRITE,
         mapped_at_creation: true
     });
+    
+    let shader_module = _device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("Sort shader"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("sort.wgsl").into()),
+    });
+    println!("Created shader module");
+    let pipeline = _device.create_compute_pipeline(&ComputePipelineDescriptor {
+        label: Some("Sort pipeline"),
+        layout: None,
+        entry_point: "main",
+        module: &shader_module
+    });
+
 
     let timer = Instant::now();
-    sort_arrays_gpu(&arrays, &_device, &_queue, &staging_buffer, &upload_buffer).await;
+    sort_arrays_gpu(&arrays, &_device, &_queue, &staging_buffer, &upload_buffer, &pipeline).await;
     println!("Total GPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
     
     let timer = Instant::now();
@@ -34,7 +47,7 @@ async fn main() {
 }
 
 
-pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queue: &wgpu::Queue, staging_buffer: &wgpu::Buffer, upload_buffer: &wgpu::Buffer) {
+pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queue: &wgpu::Queue, staging_buffer: &wgpu::Buffer, upload_buffer: &wgpu::Buffer, pipeline: &wgpu::ComputePipeline) {
     let num_arrays = arrays.len();
     let array_size = arrays[0].len() as u32;
     let total_size = num_arrays * array_size as usize;
@@ -44,10 +57,12 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
     let array_buffer = device.create_buffer(&BufferDescriptor { 
         label: Some("Array buffer"),
         size: total_size as u64 * std::mem::size_of::<u32>() as u64,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST ,
         mapped_at_creation: false
     });
-    
+    println!("{} time is {} ms", "Creating array_buffer", timer.elapsed().as_secs_f64() * 1000.0);
+
+    let timer = Instant::now();
     // Write data directly to mapped upload buffer without creating intermediate flat vector
     {
         let mut mapped = upload_buffer.slice(..).get_mapped_range_mut();
@@ -61,6 +76,9 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
     }
     upload_buffer.unmap();
     
+    println!("{} time is {} ms", "Uploading buffer", timer.elapsed().as_secs_f64() * 1000.0);
+
+    let timer = Instant::now(); 
     // Combine uniform data into single buffer to reduce buffer count
     let mut uniform_data = Vec::new();
     uniform_data.extend_from_slice(bytemuck::bytes_of(&array_size));
@@ -71,20 +89,8 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
         contents: &uniform_data,
         usage: wgpu::BufferUsages::UNIFORM,
     });
-    println!("{} time is {} ms", "Buffer creation", timer.elapsed().as_secs_f64() * 1000.0);
+    println!("{} time is {} ms", "Creating uniform_buffer", timer.elapsed().as_secs_f64() * 1000.0);
     
-    let timer = Instant::now(); 
-    let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("Sort shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("sort.wgsl").into()),
-    });
-    println!("Created shader module");
-    let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-        label: Some("Sort pipeline"),
-        layout: None,
-        entry_point: "main",
-        module: &shader_module
-    });
 
     let bind_group_layout = pipeline.get_bind_group_layout(0);
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -101,12 +107,16 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
             },
         ],
     });
-    println!("{} time is {} ms", "Pipeline + bind groups", timer.elapsed().as_secs_f64() * 1000.0);
+    println!("{} time is {} ms", "bind groups", timer.elapsed().as_secs_f64() * 1000.0);
     
+
+
     let timer = Instant::now();
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("Sort command encoder"),
     });
+    encoder.copy_buffer_to_buffer(&upload_buffer, 0, &array_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
+ 
     {
         let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
             label: Some("Some compute pass"),
@@ -117,8 +127,7 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
         compute_pass.dispatch_workgroups((num_arrays as u32 + 255) / 256, 1, 1);
     }
     // Copy from upload buffer to array buffer, then array buffer to staging buffer
-    encoder.copy_buffer_to_buffer(&upload_buffer, 0, &array_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
-    encoder.copy_buffer_to_buffer(&array_buffer, 0, &staging_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
+   encoder.copy_buffer_to_buffer(&array_buffer, 0, &staging_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
     let command_buffer = encoder.finish();
     println!("{} time is {} ms", "Encoder + command buffers", timer.elapsed().as_secs_f64() * 1000.0);
     
@@ -167,6 +176,8 @@ pub async fn request_gpu_resource() -> (wgpu::Adapter, wgpu::Device, wgpu::Queue
     // Get adapter limits and increase storage buffer binding size
     let mut limits = adapter.limits();
     limits.max_storage_buffer_binding_size = 2048 * 1024 * 1024; // 512 MB for storage
+    
+    adapter.features().set(Features::MAPPABLE_PRIMARY_BUFFERS, true);
     
     let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
