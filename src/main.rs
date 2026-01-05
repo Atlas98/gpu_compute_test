@@ -35,6 +35,7 @@ async fn main() {
 
 
 pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queue: &wgpu::Queue, staging_buffer: &wgpu::Buffer, upload_buffer: &wgpu::Buffer) {
+    let timer = Instant::now();
     let num_arrays = arrays.len();
     let array_size = arrays[0].len() as u32;
     let total_size = num_arrays * array_size as usize;
@@ -43,7 +44,8 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
     for arr in arrays {
         flat.extend_from_slice(arr);
     }
-
+    println!("{} time is {} ms", "Flattening", timer.elapsed().as_secs_f64() * 1000.0);
+ 
     let timer = Instant::now();
     // Create buffers without initial data for faster creation
     let array_buffer = device.create_buffer(&BufferDescriptor { 
