@@ -35,17 +35,10 @@ async fn main() {
 
 
 pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queue: &wgpu::Queue, staging_buffer: &wgpu::Buffer, upload_buffer: &wgpu::Buffer) {
-    let timer = Instant::now();
     let num_arrays = arrays.len();
     let array_size = arrays[0].len() as u32;
     let total_size = num_arrays * array_size as usize;
-    let mut flat: Vec<u32> = Vec::with_capacity(total_size);
-
-    for arr in arrays {
-        flat.extend_from_slice(arr);
-    }
-    println!("{} time is {} ms", "Flattening", timer.elapsed().as_secs_f64() * 1000.0);
- 
+    
     let timer = Instant::now();
     // Create buffers without initial data for faster creation
     let array_buffer = device.create_buffer(&BufferDescriptor { 
@@ -55,11 +48,15 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
         mapped_at_creation: false
     });
     
-    // Write data to mapped upload buffer (no blocking)
+    // Write data directly to mapped upload buffer without creating intermediate flat vector
     {
         let mut mapped = upload_buffer.slice(..).get_mapped_range_mut();
         let slice = bytemuck::cast_slice_mut(&mut mapped);
-        slice.copy_from_slice(&flat);
+        let mut offset = 0;
+        for arr in arrays {
+            slice[offset..offset + arr.len()].copy_from_slice(arr);
+            offset += arr.len();
+        }
         drop(mapped); // Release the mapping
     }
     upload_buffer.unmap();
