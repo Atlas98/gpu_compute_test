@@ -1,7 +1,6 @@
 use std::time::Instant;
 
-use rand::distr::uniform;
-use wgpu::{BufferDescriptor, ComputePassDescriptor, ComputePipelineDescriptor, hal::MAX_BIND_GROUPS, util::{BufferInitDescriptor, DeviceExt}};
+use wgpu::{BufferDescriptor, ComputePassDescriptor, ComputePipelineDescriptor, util::{BufferInitDescriptor, DeviceExt}};
 
 #[tokio::main]
 async fn main() {
@@ -30,26 +29,30 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
     }
 
     let timer = Instant::now();
-    let array_buffer = device.create_buffer_init(&BufferInitDescriptor { 
+    // Create buffers without initial data for faster creation
+    let array_buffer = device.create_buffer(&BufferDescriptor { 
         label: Some("Array buffer"),
-        contents: bytemuck::cast_slice(&flat), 
+        size: total_size as u64 * std::mem::size_of::<u32>() as u64,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false
     });
     
-    let num_arrays_buffer = device.create_buffer_init(&BufferInitDescriptor { 
-        label: Some("Num arrays buffer"),
-        contents: bytemuck::bytes_of(&(num_arrays as u32)), 
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
+    // Write data asynchronously to avoid blocking
+    queue.write_buffer(&array_buffer, 0, bytemuck::cast_slice(&flat));
+    
+    // Combine uniform data into single buffer to reduce buffer count
+    let mut uniform_data = Vec::new();
+    uniform_data.extend_from_slice(bytemuck::bytes_of(&array_size));
+    uniform_data.extend_from_slice(bytemuck::bytes_of(&(num_arrays as u32)));
     
     let uniform_buffer = device.create_buffer_init(&BufferInitDescriptor { 
         label: Some("Uniform buffer"),
-        contents: bytemuck::bytes_of(&array_size), 
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        contents: &uniform_data,
+        usage: wgpu::BufferUsages::UNIFORM,
     });
     
     let staging_buffer = device.create_buffer(&BufferDescriptor { 
-        label: Some("Array buffer"),
+        label: Some("Staging buffer"),
         size: total_size as u64 * std::mem::size_of::<u32>() as u64,
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false
@@ -82,10 +85,6 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
                 binding: 1,
                 resource: uniform_buffer.as_entire_binding(),
             },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: num_arrays_buffer.as_entire_binding(),
-            },
         ],
     });
     println!("{} time is {} ms", "Pipeline + bind groups", timer.elapsed().as_secs_f64() * 1000.0);
@@ -110,7 +109,8 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
     let timer = Instant::now();
     queue.submit(std::iter::once(command_buffer)); 
     device.poll(wgpu::Maintain::Wait);
-    println!("GPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
+    let submission_time = timer.elapsed().as_secs_f64() * 1000.0;
+    println!("GPU compute + copy time: {:?} ms", submission_time);
     
     let timer = Instant::now();
     let buffer_slice = staging_buffer.slice(..);
@@ -124,16 +124,12 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
 
     receiver.receive().await.unwrap().unwrap();
     let data = buffer_slice.get_mapped_range();
-    let result: Vec<u32> = bytemuck::cast_slice(&data).to_vec();
-
-    let mut sorted_arrays = Vec::with_capacity(num_arrays);
-    for i in 0..num_arrays {
-        let start = i * array_size as usize;
-        let end = start + array_size as usize;
-        sorted_arrays.push(result[start..end].to_vec());
-    }
-
-    println!("Sorted first array(GPU): {:?}", sorted_arrays[num_arrays - 1]);
+    
+    // Avoid unnecessary vector copy - work with slice directly
+    let data_slice: &[u32] = bytemuck::cast_slice(&data);
+    println!("Data slice size: {}", data_slice.len());   
+    println!("Sorted first array(GPU): {:?}", &data_slice[(num_arrays - 1) * array_size as usize..(num_arrays) * array_size as usize]);
+    
     drop(data);
     staging_buffer.unmap();
     println!("{} time is {} ms", "Readback", timer.elapsed().as_secs_f64() * 1000.0);
