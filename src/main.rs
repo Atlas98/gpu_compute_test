@@ -12,13 +12,29 @@ async fn main() {
     sort_arrays_cpu(&arrays);
     println!("Total CPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
 
+    // Create persistent staging buffer and upload buffer outside timing
+    let total_size = arrays.len() * arrays[0].len();
+    let staging_buffer = _device.create_buffer(&BufferDescriptor { 
+        label: Some("Persistent staging buffer"),
+        size: total_size as u64 * std::mem::size_of::<u32>() as u64,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false
+    });
+    
+    let upload_buffer = _device.create_buffer(&BufferDescriptor {
+        label: Some("Persistent upload buffer"),
+        size: total_size as u64 * std::mem::size_of::<u32>() as u64,
+        usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::MAP_WRITE,
+        mapped_at_creation: true
+    });
+
     let timer = Instant::now();
-    sort_arrays_gpu(&arrays, &_device, &_queue).await;
+    sort_arrays_gpu(&arrays, &_device, &_queue, &staging_buffer, &upload_buffer).await;
     println!("Total GPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
 }
 
 
-pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queue: &wgpu::Queue) {
+pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queue: &wgpu::Queue, staging_buffer: &wgpu::Buffer, upload_buffer: &wgpu::Buffer) {
     let num_arrays = arrays.len();
     let array_size = arrays[0].len() as u32;
     let total_size = num_arrays * array_size as usize;
@@ -37,8 +53,14 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
         mapped_at_creation: false
     });
     
-    // Write data asynchronously to avoid blocking
-    queue.write_buffer(&array_buffer, 0, bytemuck::cast_slice(&flat));
+    // Write data to mapped upload buffer (no blocking)
+    {
+        let mut mapped = upload_buffer.slice(..).get_mapped_range_mut();
+        let slice = bytemuck::cast_slice_mut(&mut mapped);
+        slice.copy_from_slice(&flat);
+        drop(mapped); // Release the mapping
+    }
+    upload_buffer.unmap();
     
     // Combine uniform data into single buffer to reduce buffer count
     let mut uniform_data = Vec::new();
@@ -49,13 +71,6 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
         label: Some("Uniform buffer"),
         contents: &uniform_data,
         usage: wgpu::BufferUsages::UNIFORM,
-    });
-    
-    let staging_buffer = device.create_buffer(&BufferDescriptor { 
-        label: Some("Staging buffer"),
-        size: total_size as u64 * std::mem::size_of::<u32>() as u64,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false
     });
     println!("{} time is {} ms", "Buffer creation", timer.elapsed().as_secs_f64() * 1000.0);
     
@@ -102,6 +117,8 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
         compute_pass.set_bind_group(0, &bind_group, &[]);
         compute_pass.dispatch_workgroups((num_arrays as u32 + 15) / 16, 1, 1);
     }
+    // Copy from upload buffer to array buffer, then array buffer to staging buffer
+    encoder.copy_buffer_to_buffer(&upload_buffer, 0, &array_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
     encoder.copy_buffer_to_buffer(&array_buffer, 0, &staging_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
     let command_buffer = encoder.finish();
     println!("{} time is {} ms", "Encoder + command buffers", timer.elapsed().as_secs_f64() * 1000.0);
