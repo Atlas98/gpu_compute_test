@@ -1,0 +1,176 @@
+use std::time::Instant;
+
+use rand::distr::uniform;
+use wgpu::{BufferDescriptor, ComputePassDescriptor, ComputePipelineDescriptor, hal::MAX_BIND_GROUPS, util::{BufferInitDescriptor, DeviceExt}};
+
+#[tokio::main]
+async fn main() {
+ 
+    let (_adapter, _device, _queue) = request_gpu_resource().await;
+    let arrays = create_random_arrays(1000000, 32); 
+
+    let timer = Instant::now();
+    sort_arrays_cpu(&arrays);
+    println!("Total CPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
+
+    let timer = Instant::now();
+    sort_arrays_gpu(&arrays, &_device, &_queue).await;
+    println!("Total CPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
+}
+
+
+pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queue: &wgpu::Queue) {
+    let num_arrays = arrays.len();
+    let array_size = arrays[0].len() as u32;
+    let total_size = num_arrays * array_size as usize;
+    let mut flat: Vec<u32> = Vec::with_capacity(total_size);
+
+    for arr in arrays {
+        flat.extend_from_slice(arr);
+    }
+
+    let array_buffer = device.create_buffer_init(&BufferInitDescriptor { 
+        label: Some("Array buffer"),
+        contents: bytemuck::cast_slice(&flat), 
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+    });
+    
+    let num_arrays_buffer = device.create_buffer_init(&BufferInitDescriptor { 
+        label: Some("Num arrays buffer"),
+        contents: bytemuck::bytes_of(&(num_arrays as u32)), 
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+    
+    let uniform_buffer = device.create_buffer_init(&BufferInitDescriptor { 
+        label: Some("Uniform buffer"),
+        contents: bytemuck::bytes_of(&array_size), 
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+    
+    let staging_buffer = device.create_buffer(&BufferDescriptor { 
+        label: Some("Array buffer"),
+        size: total_size as u64 * std::mem::size_of::<u32>() as u64,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false
+    });
+
+    let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("Sort shader"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("sort.wgsl").into()),
+    });
+    let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+        label: Some("Sort pipeline"),
+        layout: None,
+        entry_point: "main",
+        module: &shader_module
+    });
+
+    let bind_group_layout = pipeline.get_bind_group_layout(0);
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Sort bind group"),
+        layout: &bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: array_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: uniform_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: num_arrays_buffer.as_entire_binding(),
+            },
+        ],
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("Sort command encoder"),
+    });
+    {
+        let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+            label: Some("Some compute pass"),
+            timestamp_writes: None
+        });
+        compute_pass.set_pipeline(&pipeline);
+        compute_pass.set_bind_group(0, &bind_group, &[]);
+        compute_pass.dispatch_workgroups((num_arrays as u32 + 15) / 16, 1, 1);
+    }
+    encoder.copy_buffer_to_buffer(&array_buffer, 0, &staging_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
+    let command_buffer = encoder.finish();
+
+    let timer = Instant::now();
+    queue.submit(std::iter::once(command_buffer)); 
+    device.poll(wgpu::Maintain::Wait);
+    println!("GPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
+    
+    let buffer_slice = staging_buffer.slice(..);
+    let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
+    buffer_slice.map_async(wgpu::MapMode::Read, 
+        move |v| {
+            let _ = sender.send(v);
+        }
+    );
+    device.poll(wgpu::Maintain::Wait);
+
+    receiver.receive().await.unwrap().unwrap();
+    let data = buffer_slice.get_mapped_range();
+    let result: Vec<u32> = bytemuck::cast_slice(&data).to_vec();
+
+    let mut sorted_arrays = Vec::with_capacity(num_arrays);
+    for i in 0..num_arrays {
+        let start = i * array_size as usize;
+        let end = start + array_size as usize;
+        sorted_arrays.push(result[start..end].to_vec());
+    }
+
+    println!("Sorted first array(GPU): {:?}", sorted_arrays[num_arrays - 1]);
+    drop(data);
+    staging_buffer.unmap();
+
+}
+
+pub async fn request_gpu_resource() -> (wgpu::Adapter, wgpu::Device, wgpu::Queue) {
+
+    let instance = wgpu::Instance::default();
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::None,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        })
+        .await
+        .expect("Failed to find adapter");
+    adapter.features().set(wgpu::Features::MAPPABLE_PRIMARY_BUFFERS, true);
+
+    let (device, queue) = adapter
+        .request_device(&wgpu::DeviceDescriptor::default(), None)
+        .await
+        .expect("Failed to create device");
+    (adapter, device, queue)
+}
+
+pub fn sort_arrays_cpu(arrays: &Vec<Vec<u32>>) {
+    let mut last_arr = arrays[0].clone();
+    for(i, array) in arrays.iter().enumerate() {
+        let mut arr = array.clone();
+
+        arr.sort();
+        if i == arrays.len() - 1 {
+            last_arr = arr.clone();
+        }
+
+    }
+    println!("Sorted array {} on CPU: {:?}", 0, last_arr);
+
+}
+
+pub fn create_random_arrays(num_arrays: usize, size: usize) -> Vec<Vec<u32>> {
+    (0..num_arrays).map(|_| {
+        use rand::Rng;
+        let mut rng = rand::rng();
+        (0..size).map(|_| rng.random_range(0..100)).collect()
+
+    }).collect()
+}

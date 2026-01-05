@@ -1,0 +1,32 @@
+
+@group(0) @binding(0)
+var<storage, read_write> arr: array<u32>;
+
+@group(0) @binding(1)
+var<uniform> array_size: u32;
+
+@group(0) @binding(2)
+var<uniform> num_arrays: u32;
+
+@compute @workgroup_size(16)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let array_index = global_id.x;
+    if(array_index >= num_arrays) {
+        return;
+    }
+    let offset = array_index * array_size;
+    
+    for(var i: u32 = 0u; i < array_size; i = i + 1u) {
+        for(var j: u32 = 0u; j < array_size - 1u -i; j = j + 1u) {
+
+            if(arr[offset+j] > arr[offset + j + 1u]) {
+                // swap
+                let temp = arr[offset+j];
+                arr[offset+j] = arr[offset + j + 1u];
+                arr[offset+j+1u] = temp;
+            }
+
+        }
+    }
+
+}
