@@ -6,11 +6,7 @@ use wgpu::{BufferDescriptor, ComputePassDescriptor, ComputePipelineDescriptor, u
 async fn main() {
  
     let (_adapter, _device, _queue) = request_gpu_resource().await;
-    let arrays = create_random_arrays(1000000, 32); 
-
-    let timer = Instant::now();
-    sort_arrays_cpu(&arrays);
-    println!("Total CPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
+    let arrays = create_random_arrays(10000000, 32); 
 
     // Create persistent staging buffer and upload buffer outside timing
     let total_size = arrays.len() * arrays[0].len();
@@ -31,6 +27,10 @@ async fn main() {
     let timer = Instant::now();
     sort_arrays_gpu(&arrays, &_device, &_queue, &staging_buffer, &upload_buffer).await;
     println!("Total GPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
+    
+    let timer = Instant::now();
+    sort_arrays_cpu(&arrays);
+    println!("Total CPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
 }
 
 
@@ -114,7 +114,7 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
         });
         compute_pass.set_pipeline(&pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
-        compute_pass.dispatch_workgroups((num_arrays as u32 + 15) / 16, 1, 1);
+        compute_pass.dispatch_workgroups((num_arrays as u32 + 255) / 256, 1, 1);
     }
     // Copy from upload buffer to array buffer, then array buffer to staging buffer
     encoder.copy_buffer_to_buffer(&upload_buffer, 0, &array_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
@@ -163,10 +163,16 @@ pub async fn request_gpu_resource() -> (wgpu::Adapter, wgpu::Device, wgpu::Queue
         })
         .await
         .expect("Failed to find adapter");
-    adapter.features().set(wgpu::Features::MAPPABLE_PRIMARY_BUFFERS, true);
 
+    // Get adapter limits and increase storage buffer binding size
+    let mut limits = adapter.limits();
+    limits.max_storage_buffer_binding_size = 2048 * 1024 * 1024; // 512 MB for storage
+    
     let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor::default(), None)
+        .request_device(&wgpu::DeviceDescriptor {
+            required_limits: limits,
+            ..Default::default()
+        }, None)
         .await
         .expect("Failed to create device");
     (adapter, device, queue)
