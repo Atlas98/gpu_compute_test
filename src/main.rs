@@ -15,7 +15,7 @@ async fn main() {
 
     let timer = Instant::now();
     sort_arrays_gpu(&arrays, &_device, &_queue).await;
-    println!("Total CPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
+    println!("Total GPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
 }
 
 
@@ -29,6 +29,7 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
         flat.extend_from_slice(arr);
     }
 
+    let timer = Instant::now();
     let array_buffer = device.create_buffer_init(&BufferInitDescriptor { 
         label: Some("Array buffer"),
         contents: bytemuck::cast_slice(&flat), 
@@ -53,11 +54,14 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false
     });
-
+    println!("{} time is {} ms", "Buffer creation", timer.elapsed().as_secs_f64() * 1000.0);
+    
+    let timer = Instant::now(); 
     let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Sort shader"),
         source: wgpu::ShaderSource::Wgsl(include_str!("sort.wgsl").into()),
     });
+    println!("Created shader module");
     let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
         label: Some("Sort pipeline"),
         layout: None,
@@ -84,7 +88,9 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
             },
         ],
     });
-
+    println!("{} time is {} ms", "Pipeline + bind groups", timer.elapsed().as_secs_f64() * 1000.0);
+    
+    let timer = Instant::now();
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("Sort command encoder"),
     });
@@ -99,12 +105,14 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
     }
     encoder.copy_buffer_to_buffer(&array_buffer, 0, &staging_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
     let command_buffer = encoder.finish();
-
+    println!("{} time is {} ms", "Encoder + command buffers", timer.elapsed().as_secs_f64() * 1000.0);
+    
     let timer = Instant::now();
     queue.submit(std::iter::once(command_buffer)); 
     device.poll(wgpu::Maintain::Wait);
     println!("GPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
     
+    let timer = Instant::now();
     let buffer_slice = staging_buffer.slice(..);
     let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
     buffer_slice.map_async(wgpu::MapMode::Read, 
@@ -128,6 +136,7 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
     println!("Sorted first array(GPU): {:?}", sorted_arrays[num_arrays - 1]);
     drop(data);
     staging_buffer.unmap();
+    println!("{} time is {} ms", "Readback", timer.elapsed().as_secs_f64() * 1000.0);
 
 }
 
