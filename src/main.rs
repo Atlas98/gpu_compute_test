@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use wgpu::{BufferDescriptor, ComputePassDescriptor, ComputePipelineDescriptor, Features, PipelineCompilationOptions, PollType, Queue, util::{BufferInitDescriptor, DeviceExt}};
+use wgpu::{BufferDescriptor, ComputePassDescriptor, ComputePipelineDescriptor, Features, PipelineCompilationOptions, PollType, util::{BufferInitDescriptor, DeviceExt}};
 
 #[tokio::main]
 async fn main() {
