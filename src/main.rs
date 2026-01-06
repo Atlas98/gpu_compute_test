@@ -6,7 +6,7 @@ use wgpu::{BufferDescriptor, ComputePassDescriptor, ComputePipelineDescriptor, F
 async fn main() {
  
     let (_adapter, _device, _queue) = request_gpu_resource().await;
-    let arrays = create_random_arrays(10000000, 32); 
+    let arrays = create_random_arrays(100000, 320); 
 
     // Create persistent staging buffer and upload buffer outside timing
     let total_size = arrays.len() * arrays[0].len();
@@ -63,18 +63,17 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
     println!("{} time is {} ms", "Creating array_buffer", timer.elapsed().as_secs_f64() * 1000.0);
 
     let timer = Instant::now();
-    // Write data directly to mapped upload buffer without creating intermediate flat vector
-    {
-        let mut mapped = upload_buffer.slice(..).get_mapped_range_mut();
-        let slice = bytemuck::cast_slice_mut(&mut mapped);
-        let mut offset = 0;
-        for arr in arrays {
-            slice[offset..offset + arr.len()].copy_from_slice(arr);
-            offset += arr.len();
-        }
-        drop(mapped); // Release the mapping
-    }
+    // Create a single flat vector to hold all the data
+    let flattened_data: Vec<u8> = arrays.iter()
+        .flat_map(|arr| bytemuck::cast_slice(arr).iter().copied())  // Convert each array to a slice of bytes and flatten them
+        .collect();  // Collect into a single vector
+
+    // Step 2: Write the flattened data to the GPU buffer
+    queue.write_buffer(&array_buffer, 0, &flattened_data);
+
+    // Write the data directly to the upload buffer using queue.write_buffer
     upload_buffer.unmap();
+
     
     println!("{} time is {} ms", "Uploading buffer", timer.elapsed().as_secs_f64() * 1000.0);
 
@@ -115,7 +114,7 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("Sort command encoder"),
     });
-    encoder.copy_buffer_to_buffer(&upload_buffer, 0, &array_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
+    //encoder.copy_buffer_to_buffer(&upload_buffer, 0, &array_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
  
     {
         let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
