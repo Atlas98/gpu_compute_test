@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use wgpu::{BufferDescriptor, ComputePassDescriptor, ComputePipelineDescriptor, Features, Queue, util::{BufferInitDescriptor, DeviceExt}};
+use wgpu::{BufferDescriptor, ComputePassDescriptor, ComputePipelineDescriptor, Features, PipelineCompilationOptions, PollType, Queue, util::{BufferInitDescriptor, DeviceExt}};
 
 #[tokio::main]
 async fn main() {
@@ -32,8 +32,10 @@ async fn main() {
     let pipeline = _device.create_compute_pipeline(&ComputePipelineDescriptor {
         label: Some("Sort pipeline"),
         layout: None,
-        entry_point: "main",
-        module: &shader_module
+        entry_point: Some("main"),
+        module: &shader_module,
+        cache: None,
+        compilation_options: PipelineCompilationOptions::default(),
     });
 
 
@@ -132,8 +134,9 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
     
     let timer = Instant::now();
     queue.submit(std::iter::once(command_buffer)); 
-    device.poll(wgpu::Maintain::Wait);
-    let submission_time = timer.elapsed().as_secs_f64() * 1000.0;
+    let _ = device.poll(PollType::wait_indefinitely());
+
+   let submission_time = timer.elapsed().as_secs_f64() * 1000.0;
     println!("GPU compute + copy time: {:?} ms", submission_time);
     
     let timer = Instant::now();
@@ -144,7 +147,7 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
             let _ = sender.send(v);
         }
     );
-    device.poll(wgpu::Maintain::Wait);
+    let _ = device.poll(PollType::wait_indefinitely());
 
     receiver.receive().await.unwrap().unwrap();
     let data = buffer_slice.get_mapped_range();
@@ -182,7 +185,7 @@ pub async fn request_gpu_resource() -> (wgpu::Adapter, wgpu::Device, wgpu::Queue
         .request_device(&wgpu::DeviceDescriptor {
             required_limits: limits,
             ..Default::default()
-        }, None)
+        })
         .await
         .expect("Failed to create device");
     (adapter, device, queue)
