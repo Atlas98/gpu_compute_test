@@ -13,7 +13,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let offset = array_index * array_size;
 
     if(array_index >= num_arrays) {
-        return;
+        //return;
     }
 
     for(var i: u32 = 0u; i < array_size; i = i + 1u) {

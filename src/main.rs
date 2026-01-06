@@ -1,46 +1,26 @@
 use std::time::Instant;
 
-use wgpu::{BufferDescriptor, ComputePassDescriptor, ComputePipelineDescriptor, Features, PipelineCompilationOptions, PollType, util::{BufferInitDescriptor, DeviceExt}};
+use wgpu::{ComputePassDescriptor, PollType, util::{BufferInitDescriptor, DeviceExt}};
+
+use crate::wgsl_helpers::{create_compute_pipeline, create_download_buffer, create_storage_buffer, create_upload_buffer, request_gpu_resource};
+mod wgsl_helpers;
 
 #[tokio::main]
 async fn main() {
  
-    let (_adapter, _device, _queue) = request_gpu_resource().await;
+    let (adapter, device, queue) = request_gpu_resource().await;
     let arrays = create_random_arrays(100000, 64); 
 
     // Create persistent staging buffer and upload buffer outside timing
-    let total_size = arrays.len() * arrays[0].len();
-    let staging_buffer = _device.create_buffer(&BufferDescriptor { 
-        label: Some("Persistent staging buffer"),
-        size: total_size as u64 * std::mem::size_of::<u32>() as u64,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false
-    });
-    
-    let upload_buffer = _device.create_buffer(&BufferDescriptor {
-        label: Some("Persistent upload buffer"),
-        size: total_size as u64 * std::mem::size_of::<u32>() as u64,
-        usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::MAP_WRITE,
-        mapped_at_creation: true
-    });
-    
-    let shader_module = _device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("Sort shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("sort.wgsl").into()),
-    });
-    println!("Created shader module");
-    let pipeline = _device.create_compute_pipeline(&ComputePipelineDescriptor {
-        label: Some("Sort pipeline"),
-        layout: None,
-        entry_point: Some("main"),
-        module: &shader_module,
-        cache: None,
-        compilation_options: PipelineCompilationOptions::default(),
-    });
-
+    let total_size = arrays.len() * arrays[0].len() * size_of::<u32>();
+    let total_size = total_size as u64;
+   
+    let staging_buffer = create_download_buffer(&device, "Staging buffer", total_size);
+    let upload_buffer = create_upload_buffer(&device, "Upload buffer", total_size); 
+    let pipeline = create_compute_pipeline(&device, "Basic compute", "sort.wgsl", "main");
 
     let timer = Instant::now();
-    sort_arrays_gpu(&arrays, &_device, &_queue, &staging_buffer, &upload_buffer, &pipeline).await;
+    sort_arrays_gpu(&arrays, &device, &queue, &staging_buffer, &upload_buffer, &pipeline).await;
     println!("Total GPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
     
     let timer = Instant::now();
@@ -56,12 +36,7 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
     
     let timer = Instant::now();
     // Create buffers without initial data for faster creation
-    let array_buffer = device.create_buffer(&BufferDescriptor { 
-        label: Some("Array buffer"),
-        size: total_size as u64 * std::mem::size_of::<u32>() as u64,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST ,
-        mapped_at_creation: false
-    });
+    let array_buffer = create_storage_buffer(&device, "Array buffer", (total_size * size_of::<u32>()) as u64);
     println!("{} time is {} ms", "Creating array_buffer", timer.elapsed().as_secs_f64() * 1000.0);
 
     let timer = Instant::now();
@@ -71,12 +46,8 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
         .collect();  // Collect into a single vector
 
     // Step 2: Write the flattened data to the GPU buffer
-    queue.write_buffer(&array_buffer, 0, &flattened_data);
+    //queue.write_buffer(&upload_buffer, 0, &flattened_data);
 
-    // Write the data directly to the upload buffer using queue.write_buffer
-    upload_buffer.unmap();
-
-    
     println!("{} time is {} ms", "Uploading buffer", timer.elapsed().as_secs_f64() * 1000.0);
 
     let timer = Instant::now(); 
@@ -117,7 +88,9 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
         label: Some("Sort command encoder"),
     });
     //encoder.copy_buffer_to_buffer(&upload_buffer, 0, &array_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
- 
+    encoder.map_buffer_on_submit(upload_buffer, wgpu::MapMode::Write, 0, callback);
+
+    
     {
         let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
             label: Some("Some compute pass"),
@@ -163,33 +136,7 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
 
 }
 
-pub async fn request_gpu_resource() -> (wgpu::Adapter, wgpu::Device, wgpu::Queue) {
 
-    let instance = wgpu::Instance::default();
-    let adapter = instance
-        .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::None,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        })
-        .await
-        .expect("Failed to find adapter");
-
-    // Get adapter limits and increase storage buffer binding size
-    let mut limits = adapter.limits();
-    limits.max_storage_buffer_binding_size = 512 * 1024 * 1024; // 512 MB for storage
-    
-    adapter.features().set(Features::MAPPABLE_PRIMARY_BUFFERS, true);
-    
-    let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor {
-            required_limits: limits,
-            ..Default::default()
-        })
-        .await
-        .expect("Failed to create device");
-    (adapter, device, queue)
-}
 
 pub fn sort_arrays_cpu(arrays: &Vec<Vec<u32>>) {
     let mut last_arr = arrays[0].clone();
