@@ -6,7 +6,7 @@ use wgpu::{BufferDescriptor, ComputePassDescriptor, ComputePipelineDescriptor, F
 async fn main() {
  
     let (_adapter, _device, _queue) = request_gpu_resource().await;
-    let arrays = create_random_arrays(100000, 320); 
+    let arrays = create_random_arrays(10, 32); 
 
     // Create persistent staging buffer and upload buffer outside timing
     let total_size = arrays.len() * arrays[0].len();
