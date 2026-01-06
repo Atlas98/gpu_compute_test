@@ -6,7 +6,7 @@ use wgpu::{BufferDescriptor, ComputePassDescriptor, ComputePipelineDescriptor, F
 async fn main() {
  
     let (_adapter, _device, _queue) = request_gpu_resource().await;
-    let arrays = create_random_arrays(10, 32); 
+    let arrays = create_random_arrays(100000, 64); 
 
     // Create persistent staging buffer and upload buffer outside timing
     let total_size = arrays.len() * arrays[0].len();
@@ -177,7 +177,7 @@ pub async fn request_gpu_resource() -> (wgpu::Adapter, wgpu::Device, wgpu::Queue
 
     // Get adapter limits and increase storage buffer binding size
     let mut limits = adapter.limits();
-    limits.max_storage_buffer_binding_size = 2048 * 1024 * 1024; // 512 MB for storage
+    limits.max_storage_buffer_binding_size = 512 * 1024 * 1024; // 512 MB for storage
     
     adapter.features().set(Features::MAPPABLE_PRIMARY_BUFFERS, true);
     
