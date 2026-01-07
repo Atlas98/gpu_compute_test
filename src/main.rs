@@ -1,8 +1,8 @@
-use std::{array, ops::RangeBounds, time::Instant};
+use std::time::Instant;
 
 use wgpu::{ComputePassDescriptor, PollType, util::{BufferInitDescriptor, DeviceExt}};
 
-use crate::wgsl_helpers::{create_compute_pipeline, create_download_buffer, create_mapped_buffer, create_storage_buffer, create_upload_buffer, request_gpu_resource};
+use crate::wgsl_helpers::{create_compute_pipeline, create_mapped_buffer, create_storage_buffer, request_gpu_resource};
 mod wgsl_helpers;
 
 #[tokio::main]
@@ -63,7 +63,10 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
     upload_buffer.get_mapped_range_mut(..).copy_from_slice(bytemuck::cast_slice(&flattened_data));
     upload_buffer.unmap();
 
-    println!("{} time is {} ms", "[Upload] Uploading buffer via copy_from_slice", timer.elapsed().as_secs_f64() * 1000.0);
+    let elapsed_seconds = timer.elapsed().as_secs_f64();
+    let bytes = (total_size * size_of::<u32>() / 1024 / 1024) as f64;
+    let throughput = bytes / elapsed_seconds;
+    println!("{} time is {} ms, upload throughput = {} MB/s", "[Upload] Uploading buffer via copy_from_slice", elapsed_seconds * 1000.0, throughput);
 
     let timer = Instant::now(); 
     // Combine uniform data into single buffer to reduce buffer count
