@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use futures_intrusive::buffer;
 use rand::distr::uniform;
 use wgpu::{ComputePassDescriptor, PollType, util::{BufferInitDescriptor, DeviceExt}};
 
@@ -10,7 +11,7 @@ mod wgsl_helpers;
 async fn main() {
  
     let (adapter, device, queue) = request_gpu_resource().await;
-    let arrays = create_random_arrays(1000000, 32); 
+    let arrays = create_random_arrays(1000000, 64); 
 
     // Create persistent staging buffer and upload buffer outside timing
     let total_size = arrays.len() * arrays[0].len() * size_of::<u32>();
@@ -46,27 +47,35 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
     let array_buffer = create_storage_buffer(&device, "Array buffer", (total_size * size_of::<u32>()) as u64);
     println!("{} time is {} ms", "Creating array_buffer", timer.elapsed().as_secs_f64() * 1000.0);
 
-    let timer = Instant::now();
-    // Create a single flat vector to hold all the data
-    let flattened_data: Vec<u8> = arrays.iter()
-        .flat_map(|arr| bytemuck::cast_slice(arr).iter().copied())  // Convert each array to a slice of bytes and flatten them
-        .collect();  // Collect into a single vector
-    println!("{} time is {} ms", "[Upload] Flatenning array" , timer.elapsed().as_secs_f64() * 1000.0);
-    // Step 2: Write the flattened data to the GPU buffer
-    //queue.write_buffer(&upload_buffer, 0, &flattened_data);
-
     let timer = Instant::now(); 
     upload_buffer.map_async(wgpu::MapMode::Write, .., |result| {});
     let _ = device.poll(PollType::wait_indefinitely());
     println!("{} time is {} ms", "[Upload] Mapping request duration" , timer.elapsed().as_secs_f64() * 1000.0);
 
     let timer = Instant::now();
-    upload_buffer.get_mapped_range_mut(..).copy_from_slice(bytemuck::cast_slice(&flattened_data));
+    let mut offset = 0; // Keeps track of the current position in the buffer view
+    let mut buffer_view = upload_buffer.get_mapped_range_mut(..);
+
+    arrays.iter().for_each(|arr| {
+        let slice = bytemuck::cast_slice(&arr);  // Convert the array to a byte slice
+        let slice_len = slice.len();            // Get the length of the slice
+        
+        // Ensure we don't write beyond the buffer size (good practice)
+        //assert!(offset + slice_len <= buffer_view.len(), "Out of bounds write!");
+
+        // Copy the slice data into the appropriate section of the buffer view
+        buffer_view[offset..offset + slice_len].copy_from_slice(slice);
+        
+        // Update the offset for the next iteration
+        offset += slice_len;
+    });
+    drop(buffer_view);
+    println!("Done iterating");
+    //.copy_from_slice(bytemuck::cast_slice(&flattened_data));
     upload_buffer.unmap();
 
     let elapsed_seconds = timer.elapsed().as_secs_f64();
-    let bytes = (total_size * size_of::<u32>() / 1024 / 1024) as f64;
-    let throughput = bytes / elapsed_seconds;
+    let throughput = ((total_size * size_of::<u32>() / 1024 / 1024) as f64) / elapsed_seconds;
     println!("{} time is {} ms, upload throughput = {} MB/s", "[Upload] Uploading buffer via copy_from_slice", elapsed_seconds * 1000.0, throughput);
 
     let timer = Instant::now(); 
@@ -92,9 +101,7 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("Sort command encoder"),
     });
-    encoder.copy_buffer_to_buffer(&upload_buffer, 0, &array_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
- 
-
+    encoder.copy_buffer_to_buffer(&upload_buffer, 0, &array_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64); 
     {
         let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
             label: Some("Some compute pass"),
@@ -105,7 +112,7 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
         compute_pass.dispatch_workgroups((num_arrays as u32 + 255) / 256, 1, 1);
     }
     // Copy from upload buffer to array buffer, then array buffer to staging buffer
-   encoder.copy_buffer_to_buffer(&array_buffer, 0, &staging_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
+    encoder.copy_buffer_to_buffer(&array_buffer, 0, &staging_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
     let command_buffer = encoder.finish();
     println!("{} time is {} ms", "Encoder + command buffers", timer.elapsed().as_secs_f64() * 1000.0);
     
