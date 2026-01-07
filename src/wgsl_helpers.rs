@@ -96,7 +96,7 @@ pub async fn request_gpu_resource() -> (wgpu::Adapter, wgpu::Device, wgpu::Queue
     let instance = wgpu::Instance::default();
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::None,
+            power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: None,
             force_fallback_adapter: false,
         })
@@ -107,6 +107,7 @@ pub async fn request_gpu_resource() -> (wgpu::Adapter, wgpu::Device, wgpu::Queue
     let mut limits = adapter.limits();
     limits.max_storage_buffer_binding_size = 512 * 1024 * 1024; // 512 MB for storage
 
+    println!("Adapter chosen: {}", adapter.get_info().name);
     if adapter.features().contains(wgpu::Features::MAPPABLE_PRIMARY_BUFFERS) {
         println!("MAPPABLE_PRIMARY_BUFFERS is supported.");
     } else {

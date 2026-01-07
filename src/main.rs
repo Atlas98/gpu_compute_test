@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use pollster::block_on;
-use tracy_client::Client;
+use tracy_client::{Client, SpanLocation};
 use wgpu::{ComputePassDescriptor, ComputePipeline, PollType, util::{BufferInitDescriptor, DeviceExt}};
 
 use crate::wgsl_helpers::{create_bindings_from_arrays, create_compute_pipeline, create_mapped_buffer, create_storage_buffer, request_gpu_resource};
@@ -9,10 +9,6 @@ mod wgsl_helpers;
 
 fn main() {
     let client: Client = Client::start();
-    let _ = client.new_gpu_context(Some("Hello"), tracy_client::GpuContextType::Vulkan, 0, 1000.0);
-
-    let _span = tracy_client::span!("Main program");
-
     let (_adapter, device, queue) = block_on(request_gpu_resource());
     let arrays = create_random_arrays(2000000, 64); 
 
@@ -43,7 +39,7 @@ fn main() {
 
 pub fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queue: &wgpu::Queue, staging_buffer: &wgpu::Buffer, upload_buffer: &wgpu::Buffer, pipeline: &ComputePipeline) {
     let _span = tracy_client::span!("Sort on GPU");
-
+    
     let num_arrays = arrays.len();
     let array_size = arrays[0].len() as u32;
     let total_size = num_arrays * array_size as usize;
@@ -71,8 +67,6 @@ pub fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queue: &wg
         offset += slice_len;
     });
     drop(buffer_view);
-    println!("Done iterating");
-    //.copy_from_slice(bytemuck::cast_slice(&flattened_data));
     upload_buffer.unmap();
 
     let elapsed_seconds = timer.elapsed().as_secs_f64();
@@ -96,6 +90,7 @@ pub fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queue: &wg
         label: Some("Sort command encoder"),
     });
     encoder.copy_buffer_to_buffer(&upload_buffer, 0, &array_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64); 
+    encoder.insert_debug_marker("Before compute pass");
     {
         let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
             label: Some("Some compute pass"),
@@ -105,6 +100,7 @@ pub fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queue: &wg
         compute_pass.set_bind_group(0, &bind_group, &[]);
         compute_pass.dispatch_workgroups((num_arrays as u32 + 255) / 256, 1, 1);
     }
+    encoder.insert_debug_marker("After compute pass");
     // Copy from upload buffer to array buffer, then array buffer to staging buffer
     encoder.copy_buffer_to_buffer(&array_buffer, 0, &staging_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
     let command_buffer = encoder.finish();
@@ -124,8 +120,9 @@ pub fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queue: &wg
 
     let data = buffer_slice.get_mapped_range();
     // Assuming `data_slice` is a reference to your flattened data buffer
-    
+
     let data_slice: &[u32] = bytemuck::cast_slice(&data);
+    println!("Sorted first array(GPU): {:?}", &data_slice[0 as usize..array_size as usize]);
     println!("Sorted first array(GPU): {:?}", &data_slice[(num_arrays - 1) * array_size as usize..(num_arrays) * array_size as usize]);
  
     // Access the uniform variables
