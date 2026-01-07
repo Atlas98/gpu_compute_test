@@ -20,13 +20,13 @@ async fn main() {
     let staging_buffer = create_mapped_buffer(&device, "Staging buffer", total_size);
     let upload_buffer = create_mapped_buffer(&device, "Upload buffer", total_size); 
     let pipeline = create_compute_pipeline(&device, "Basic compute", "sort.wgsl", "main");
-/*
+
     upload_buffer.map_async(wgpu::MapMode::Write, .., |result| {});
     staging_buffer.map_async(wgpu::MapMode::Write, .., |result| {});
     let _ = device.poll(PollType::wait_indefinitely()); 
     upload_buffer.unmap();
     staging_buffer.unmap();
-*/
+
     let timer = Instant::now();
     sort_arrays_gpu(&arrays, &device, &queue, &staging_buffer, &upload_buffer, &pipeline).await;
     println!("Total GPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
@@ -60,13 +60,8 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
         let slice = bytemuck::cast_slice(&arr);  // Convert the array to a byte slice
         let slice_len = slice.len();            // Get the length of the slice
         
-        // Ensure we don't write beyond the buffer size (good practice)
-        //assert!(offset + slice_len <= buffer_view.len(), "Out of bounds write!");
-
         // Copy the slice data into the appropriate section of the buffer view
-        buffer_view[offset..offset + slice_len].copy_from_slice(slice);
-        
-        // Update the offset for the next iteration
+        buffer_view[offset..offset + slice_len].copy_from_slice(slice); 
         offset += slice_len;
     });
     drop(buffer_view);
@@ -89,15 +84,8 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
         contents: &uniform_data,
         usage: wgpu::BufferUsages::UNIFORM,
     });
-    println!("{} time is {} ms", "Creating uniform_buffer", timer.elapsed().as_secs_f64() * 1000.0);
 
-    let timer = Instant::now(); 
     let bind_group = create_bindings_from_arrays(&device, &pipeline, "Basic bind group", &[&array_buffer, &uniform_buffer]);
-    println!("{} time is {} ms", "bind groups", timer.elapsed().as_secs_f64() * 1000.0);
-    
-
-
-    let timer = Instant::now();
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("Sort command encoder"),
     });
@@ -114,7 +102,7 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
     // Copy from upload buffer to array buffer, then array buffer to staging buffer
     encoder.copy_buffer_to_buffer(&array_buffer, 0, &staging_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
     let command_buffer = encoder.finish();
-    println!("{} time is {} ms", "Encoder + command buffers", timer.elapsed().as_secs_f64() * 1000.0);
+    println!("{} time is {} ms", "Uniforms + bind groups + encoder + commands", timer.elapsed().as_secs_f64() * 1000.0);
     
     let timer = Instant::now();
     queue.submit(std::iter::once(command_buffer)); 
