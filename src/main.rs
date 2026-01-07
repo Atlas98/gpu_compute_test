@@ -1,15 +1,16 @@
 use std::time::Instant;
 
+use rand::distr::uniform;
 use wgpu::{ComputePassDescriptor, PollType, util::{BufferInitDescriptor, DeviceExt}};
 
-use crate::wgsl_helpers::{create_compute_pipeline, create_mapped_buffer, create_storage_buffer, request_gpu_resource};
+use crate::wgsl_helpers::{create_bindings_from_arrays, create_compute_pipeline, create_mapped_buffer, create_storage_buffer, request_gpu_resource};
 mod wgsl_helpers;
 
 #[tokio::main]
 async fn main() {
  
     let (adapter, device, queue) = request_gpu_resource().await;
-    let arrays = create_random_arrays(100000, 64); 
+    let arrays = create_random_arrays(1000000, 32); 
 
     // Create persistent staging buffer and upload buffer outside timing
     let total_size = arrays.len() * arrays[0].len() * size_of::<u32>();
@@ -80,23 +81,9 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
         usage: wgpu::BufferUsages::UNIFORM,
     });
     println!("{} time is {} ms", "Creating uniform_buffer", timer.elapsed().as_secs_f64() * 1000.0);
-    
 
-    let bind_group_layout = pipeline.get_bind_group_layout(0);
-    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Sort bind group"),
-        layout: &bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: array_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: uniform_buffer.as_entire_binding(),
-            },
-        ],
-    });
+    let timer = Instant::now(); 
+    let bind_group = create_bindings_from_arrays(&device, &pipeline, "Basic bind group", &[&array_buffer, &uniform_buffer]);
     println!("{} time is {} ms", "bind groups", timer.elapsed().as_secs_f64() * 1000.0);
     
 
@@ -131,15 +118,9 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
     
     let timer = Instant::now();
     let buffer_slice = staging_buffer.slice(..);
-    let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
-    buffer_slice.map_async(wgpu::MapMode::Read, 
-        move |v| {
-            let _ = sender.send(v);
-        }
-    );
+    buffer_slice.map_async(wgpu::MapMode::Read, move |v| {});
     let _ = device.poll(PollType::wait_indefinitely());
 
-    receiver.receive().await.unwrap().unwrap();
     let data = buffer_slice.get_mapped_range();
     
     // Avoid unnecessary vector copy - work with slice directly

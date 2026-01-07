@@ -28,7 +28,7 @@
      
 use wgpu::*;
 
-pub fn create_compute_pipeline(device: &wgpu::Device, pipeline_name: &str, shader_file: &str, entry: &str) -> ComputePipeline {
+pub fn create_compute_pipeline(device: &Device, pipeline_name: &str, shader_file: &str, entry: &str) -> ComputePipeline {
     // Read the shader file into a string at runtime
     let shader_source = std::fs::read_to_string(format!("shaders/{}", shader_file)).expect("Failed to read shader file");
 
@@ -55,13 +55,13 @@ pub fn create_storage_buffer(device: &wgpu::Device, label: &str, size: u64) -> B
     let descriptor = BufferDescriptor {
         label: Some(label),
         size: size,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     };
     device.create_buffer(&descriptor)
 }
 
-pub fn create_mapped_buffer(device: &wgpu::Device, label: &str, size: u64) -> Buffer {
+pub fn create_mapped_buffer(device: &Device, label: &str, size: u64) -> Buffer {
     let descriptor = BufferDescriptor {
         label: Some(label),
         size: size,
@@ -71,24 +71,23 @@ pub fn create_mapped_buffer(device: &wgpu::Device, label: &str, size: u64) -> Bu
     device.create_buffer(&descriptor)
 }
 
-pub fn create_upload_buffer(device: &wgpu::Device, label: &str, size: u64) -> Buffer {
-    let descriptor = BufferDescriptor {
-        label: Some(label),
-        size: size,
-        usage: BufferUsages::MAP_WRITE | BufferUsages::MAP_READ | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    };
-    device.create_buffer(&descriptor)
-}
+pub fn create_bindings_from_arrays(device: &Device, pipeline: &ComputePipeline, label: &str, arrays: &[&Buffer]) -> BindGroup {
+    let mut bind_groups = Vec::new();
+    for (index, buffer) in arrays.iter().enumerate() {
+        let bind_group_entry = BindGroupEntry {
+            binding: index as u32,
+            resource: buffer.as_entire_binding()
+        };
+        bind_groups.push(bind_group_entry);
+    }
 
-pub fn create_download_buffer(device: &wgpu::Device, label: &str, size: u64) -> Buffer {
-    let descriptor = BufferDescriptor {
+    let bind_group_layout = pipeline.get_bind_group_layout(0);
+    
+    device.create_bind_group(&BindGroupDescriptor {
         label: Some(label),
-        size: size,
-        usage: BufferUsages::MAP_READ | BufferUsages::MAP_WRITE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    };
-    device.create_buffer(&descriptor)
+        layout: &bind_group_layout,
+        entries: &bind_groups
+    })
 }
 
 
