@@ -17,11 +17,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     for(var i: u32 = 0u; i < array_size; i = i + 1u) {
-        arr[offset+i] = global_id.x;
+        //arr[offset+i] = global_id.x;
     }
 
     if(true) {
-        return;
+        //return;
     }
 
     for(var i: u32 = 0u; i < array_size; i = i + 1u) {
