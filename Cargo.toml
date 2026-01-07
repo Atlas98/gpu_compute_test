@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-tokio = { version = "1.49.0", features = ["full"] }
-wgpu = "28.0"
+wgpu = { version = "28.0", features = ["wgpu-core"] }
 bytemuck = { version = "1.24", features = ["derive"] }
-futures-intrusive = "0.5"
-num_cpus = "1.17"
 rand = "0.9.2"
+tracing = { version = "0.1.44", features = ["async-await"] }
+tracing-subscriber = "0.3.22"
+tracy-client = { version = "0.18.4", features = ["flush-on-exit"] }
+pollster = "0.4.0"
+

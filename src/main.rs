@@ -1,17 +1,20 @@
 use std::time::Instant;
 
-use futures_intrusive::buffer;
-use rand::distr::uniform;
-use wgpu::{ComputePassDescriptor, PollType, util::{BufferInitDescriptor, DeviceExt}};
+use pollster::block_on;
+use tracy_client::Client;
+use wgpu::{ComputePassDescriptor, ComputePipeline, PollType, util::{BufferInitDescriptor, DeviceExt}};
 
 use crate::wgsl_helpers::{create_bindings_from_arrays, create_compute_pipeline, create_mapped_buffer, create_storage_buffer, request_gpu_resource};
 mod wgsl_helpers;
 
-#[tokio::main]
-async fn main() {
- 
-    let (adapter, device, queue) = request_gpu_resource().await;
-    let arrays = create_random_arrays(1000000, 64); 
+fn main() {
+    let client: Client = Client::start();
+    let _ = client.new_gpu_context(Some("Hello"), tracy_client::GpuContextType::Vulkan, 0, 1000.0);
+
+    let _span = tracy_client::span!("Main program");
+
+    let (_adapter, device, queue) = block_on(request_gpu_resource());
+    let arrays = create_random_arrays(2000000, 64); 
 
     // Create persistent staging buffer and upload buffer outside timing
     let total_size = arrays.len() * arrays[0].len() * size_of::<u32>();
@@ -21,14 +24,15 @@ async fn main() {
     let upload_buffer = create_mapped_buffer(&device, "Upload buffer", total_size); 
     let pipeline = create_compute_pipeline(&device, "Basic compute", "sort.wgsl", "main");
 
-    upload_buffer.map_async(wgpu::MapMode::Write, .., |result| {});
-    staging_buffer.map_async(wgpu::MapMode::Write, .., |result| {});
+    upload_buffer.map_async(wgpu::MapMode::Write, .., |_result| {});
+    staging_buffer.map_async(wgpu::MapMode::Write, .., |_result| {});
     let _ = device.poll(PollType::wait_indefinitely()); 
     upload_buffer.unmap();
     staging_buffer.unmap();
 
+
     let timer = Instant::now();
-    sort_arrays_gpu(&arrays, &device, &queue, &staging_buffer, &upload_buffer, &pipeline).await;
+    sort_arrays_gpu(&arrays, &device, &queue, &staging_buffer, &upload_buffer, &pipeline);
     println!("Total GPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
     
     let timer = Instant::now();
@@ -37,7 +41,9 @@ async fn main() {
 }
 
 
-pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queue: &wgpu::Queue, staging_buffer: &wgpu::Buffer, upload_buffer: &wgpu::Buffer, pipeline: &wgpu::ComputePipeline) {
+pub fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queue: &wgpu::Queue, staging_buffer: &wgpu::Buffer, upload_buffer: &wgpu::Buffer, pipeline: &ComputePipeline) {
+    let _span = tracy_client::span!("Sort on GPU");
+
     let num_arrays = arrays.len();
     let array_size = arrays[0].len() as u32;
     let total_size = num_arrays * array_size as usize;
@@ -48,7 +54,7 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
     println!("{} time is {} ms", "Creating array_buffer", timer.elapsed().as_secs_f64() * 1000.0);
 
     let timer = Instant::now(); 
-    upload_buffer.map_async(wgpu::MapMode::Write, .., |result| {});
+    upload_buffer.map_async(wgpu::MapMode::Write, .., |_result| {});
     let _ = device.poll(PollType::wait_indefinitely());
     println!("{} time is {} ms", "[Upload] Mapping request duration" , timer.elapsed().as_secs_f64() * 1000.0);
 
@@ -113,22 +119,29 @@ pub async fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queu
     
     let timer = Instant::now();
     let buffer_slice = staging_buffer.slice(..);
-    buffer_slice.map_async(wgpu::MapMode::Read, move |v| {});
+    buffer_slice.map_async(wgpu::MapMode::Read, move |_v| {});
     let _ = device.poll(PollType::wait_indefinitely());
 
     let data = buffer_slice.get_mapped_range();
+    // Assuming `data_slice` is a reference to your flattened data buffer
     
-    // Avoid unnecessary vector copy - work with slice directly
     let data_slice: &[u32] = bytemuck::cast_slice(&data);
-    println!("Data slice size: {}", data_slice.len());   
     println!("Sorted first array(GPU): {:?}", &data_slice[(num_arrays - 1) * array_size as usize..(num_arrays) * array_size as usize]);
-    
+ 
+    // Access the uniform variables
+    // Loop through all arrays and print each one
+    for _ in 0..num_arrays {
+        //let start_index = i * array_size as usize;
+        //let end_index = (i + 1) * array_size as usize;
+        
+        // Print the current array (i-th array)
+        //println!("Sorted array {} (GPU): {:?}", i, &data_slice[start_index..end_index]);
+    } 
     drop(data);
     staging_buffer.unmap();
     println!("{} time is {} ms", "Readback", timer.elapsed().as_secs_f64() * 1000.0);
 
 }
-
 
 
 pub fn sort_arrays_cpu(arrays: &Vec<Vec<u32>>) {
