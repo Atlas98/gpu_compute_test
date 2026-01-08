@@ -1,8 +1,8 @@
-use std::time::Instant;
+use std::{thread::sleep, time::{Duration, Instant}};
 
 use pollster::block_on;
-use tracy_client::{Client, SpanLocation};
-use wgpu::{ComputePassDescriptor, ComputePipeline, PollType, util::{BufferInitDescriptor, DeviceExt}};
+use tracy_client::Client;
+use wgpu::{Buffer, ComputePassDescriptor, ComputePipeline, Device, PollType, Queue, util::{BufferInitDescriptor, DeviceExt}};
 
 use crate::wgsl_helpers::{create_bindings_from_arrays, create_compute_pipeline, create_mapped_buffer, create_storage_buffer, request_gpu_resource};
 mod wgsl_helpers;
@@ -26,18 +26,18 @@ fn main() {
     upload_buffer.unmap();
     staging_buffer.unmap();
 
-
+    sleep(Duration::from_millis(200));
     let timer = Instant::now();
     sort_arrays_gpu(&arrays, &device, &queue, &staging_buffer, &upload_buffer, &pipeline);
     println!("Total GPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
     
     let timer = Instant::now();
-    sort_arrays_cpu(&arrays);
+    //sort_arrays_cpu(&arrays);
     println!("Total CPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
 }
 
 
-pub fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queue: &wgpu::Queue, staging_buffer: &wgpu::Buffer, upload_buffer: &wgpu::Buffer, pipeline: &ComputePipeline) {
+pub fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &Device, queue: &Queue, staging_buffer: &Buffer, upload_buffer: &Buffer, pipeline: &ComputePipeline) {
     let _span = tracy_client::span!("Sort on GPU");
     
     let num_arrays = arrays.len();
@@ -89,7 +89,8 @@ pub fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queue: &wg
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("Sort command encoder"),
     });
-    encoder.copy_buffer_to_buffer(&upload_buffer, 0, &array_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64); 
+
+    //encoder.copy_buffer_to_buffer(&upload_buffer, 0, &array_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64); 
     encoder.insert_debug_marker("Before compute pass");
     {
         let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
@@ -102,7 +103,7 @@ pub fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queue: &wg
     }
     encoder.insert_debug_marker("After compute pass");
     // Copy from upload buffer to array buffer, then array buffer to staging buffer
-    encoder.copy_buffer_to_buffer(&array_buffer, 0, &staging_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
+    //encoder.copy_buffer_to_buffer(&array_buffer, 0, &staging_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
     let command_buffer = encoder.finish();
     println!("{} time is {} ms", "Uniforms + bind groups + encoder + commands", timer.elapsed().as_secs_f64() * 1000.0);
     
@@ -124,8 +125,8 @@ pub fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &wgpu::Device, queue: &wg
     let data_slice: &[u32] = bytemuck::cast_slice(&data);
     println!("Sorted first array(GPU): {:?}", &data_slice[0 as usize..array_size as usize]);
     println!("Sorted first array(GPU): {:?}", &data_slice[(num_arrays - 1) * array_size as usize..(num_arrays) * array_size as usize]);
- 
-    // Access the uniform variables
+
+// Access the uniform variables
     // Loop through all arrays and print each one
     for _ in 0..num_arrays {
         //let start_index = i * array_size as usize;

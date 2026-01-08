@@ -1,32 +1,4 @@
-   //let staging_buffer = _device.create_buffer(&BufferDescriptor { 
-   //    label: Some("Persistent staging buffer"),
-   //    size: total_size as u64 * std::mem::size_of::<u32>() as u64,
-   //    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-   //    mapped_at_creation: false
-   //});
-   //
-   //let upload_buffer = _device.create_buffer(&BufferDescriptor {
-   //    label: Some("Persistent upload buffer"),
-   //    size: total_size as u64 * std::mem::size_of::<u32>() as u64,
-   //    usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::MAP_WRITE,
-   //    mapped_at_creation: true
-   //});
-   //
-   //let shader_module = _device.create_shader_module(wgpu::ShaderModuleDescriptor {
-   //    label: Some("Sort shader"),
-   //    source: wgpu::ShaderSource::Wgsl(include_str!("sort.wgsl").into()),
-   //});
-   //println!("Created shader module");
-   //let pipeline = _device.create_compute_pipeline(&ComputePipelineDescriptor {
-   //    label: Some("Sort pipeline"),
-   //    layout: None,
-   //    entry_point: Some("main"),
-   //    module: &shader_module,
-   //    cache: None,
-   //    compilation_options: PipelineCompilationOptions::default(),
-   //});
-     
-use wgpu::*;
+ use wgpu::*;
 
 pub fn create_compute_pipeline(device: &Device, pipeline_name: &str, shader_file: &str, entry: &str) -> ComputePipeline {
     // Read the shader file into a string at runtime
@@ -116,6 +88,9 @@ pub async fn request_gpu_resource() -> (wgpu::Adapter, wgpu::Device, wgpu::Queue
 
     let mut features = wgpu::Features::empty();
     features.set(Features::MAPPABLE_PRIMARY_BUFFERS, true);
+    features.set(Features::TIMESTAMP_QUERY_INSIDE_ENCODERS, true);
+    features.set(Features::TIMESTAMP_QUERY_INSIDE_PASSES, true);
+    features.set(Features::TIMESTAMP_QUERY, true);
 
     let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
