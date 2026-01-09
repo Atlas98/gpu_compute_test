@@ -118,7 +118,7 @@ pub fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &Device, queue: &Queue, s
         });
         compute_pass.set_pipeline(&pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
-        compute_pass.dispatch_workgroups((num_arrays as u32 + 1023) / 1024, 1, 1);
+        compute_pass.dispatch_workgroups((num_arrays as u32 + 255) / 256, 1, 1);
     }
     encoder.insert_debug_marker("After compute pass");
     // Copy from upload buffer to array buffer, then array buffer to staging buffer
