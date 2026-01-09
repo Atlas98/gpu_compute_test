@@ -143,7 +143,10 @@ pub fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &Device, queue: &Queue, s
 
     let data_slice: &[u32] = bytemuck::cast_slice(&data);
     println!("Sorted first array(GPU): {:?}", &data_slice[0 as usize..array_size as usize]);
-    println!("Sorted first array(GPU): {:?}", &data_slice[(num_arrays - 1) * array_size as usize..(num_arrays) * array_size as usize]);
+    println!("Sorted last array(GPU): {:?}", &data_slice[(num_arrays - 1) * array_size as usize..(num_arrays) * array_size as usize]);
+// Print the last 5 arrays
+let last_5_arrays = &data_slice[(num_arrays - 5) * array_size as usize..num_arrays * array_size as usize];
+println!("Sorted last 5 arrays(GPU): {:?}", last_5_arrays);
 
 // Access the uniform variables
     // Loop through all arrays and print each one
