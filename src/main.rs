@@ -10,7 +10,7 @@ mod wgsl_helpers;
 fn main() {
     let client: Client = Client::start();
     let (_adapter, device, queue) = block_on(request_gpu_resource());
-    let arrays = create_random_arrays(2000000, 64); 
+    let mut arrays = create_random_arrays(2000000, 32); 
 
     // Create persistent staging buffer and upload buffer outside timing
     let total_size = arrays.len() * arrays[0].len() * size_of::<u32>();
@@ -32,8 +32,12 @@ fn main() {
     println!("Total GPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
     
     let timer = Instant::now();
-    //sort_arrays_cpu(&arrays);
+    sort_arrays_cpu(&arrays);
     println!("Total CPU sorting time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
+
+    let timer = Instant::now();
+    cpu_process(&mut arrays);
+    println!("Total CPU adding time: {:?} ms", timer.elapsed().as_secs_f64() * 1000.0);
 }
 
 
@@ -90,7 +94,7 @@ pub fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &Device, queue: &Queue, s
         label: Some("Sort command encoder"),
     });
 
-    //encoder.copy_buffer_to_buffer(&upload_buffer, 0, &array_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64); 
+    encoder.copy_buffer_to_buffer(&upload_buffer, 0, &array_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64); 
     encoder.insert_debug_marker("Before compute pass");
     {
         let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
@@ -103,7 +107,7 @@ pub fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &Device, queue: &Queue, s
     }
     encoder.insert_debug_marker("After compute pass");
     // Copy from upload buffer to array buffer, then array buffer to staging buffer
-    //encoder.copy_buffer_to_buffer(&array_buffer, 0, &staging_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
+    encoder.copy_buffer_to_buffer(&array_buffer, 0, &staging_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64);
     let command_buffer = encoder.finish();
     println!("{} time is {} ms", "Uniforms + bind groups + encoder + commands", timer.elapsed().as_secs_f64() * 1000.0);
     
@@ -155,6 +159,53 @@ pub fn sort_arrays_cpu(arrays: &Vec<Vec<u32>>) {
     }
     println!("Sorted array {} on CPU: {:?}", 0, last_arr);
 
+}
+
+
+pub fn cpu_process(data: &mut Vec<Vec<u32>>) {
+    for array in data.iter_mut() {
+        let array_size = array.len();
+
+        for i in 0..array_size {
+            for _j in 0..1 {
+                let initial_value = array[i];
+                let mut final_value = 0u32;
+
+                if initial_value < 10 {
+                    final_value = 5;
+                }
+                if initial_value > 10 && initial_value < 20 {
+                    final_value = 15;
+                }
+                if initial_value > 20 && initial_value < 30 {
+                    final_value = 25;
+                }
+                if initial_value > 30 && initial_value < 40 {
+                    final_value = 35;
+                }
+                if initial_value > 40 && initial_value < 50 {
+                    final_value = 45;
+                }
+                if initial_value > 50 && initial_value < 60 {
+                    final_value = 55;
+                }
+                if initial_value > 60 && initial_value < 70 {
+                    final_value = 65;
+                }
+                if initial_value > 70 && initial_value < 80 {
+                    final_value = 75;
+                }
+                if initial_value > 80 && initial_value < 90 {
+                    final_value = 85;
+                }
+                if initial_value > 90 && initial_value < 100 {
+                    final_value = 95;
+                }
+
+                array[i] = final_value;
+            }
+        }
+    }
 }
 
 pub fn create_random_arrays(num_arrays: usize, size: usize) -> Vec<Vec<u32>> {
