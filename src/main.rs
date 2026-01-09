@@ -1,11 +1,21 @@
-use std::{thread::sleep, time::{Duration, Instant}};
+use std::{default, mem::zeroed, thread::sleep, time::{Duration, Instant}};
 
+use bytemuck::{Pod, Zeroable, bytes_of};
 use pollster::block_on;
 use tracy_client::Client;
 use wgpu::{Buffer, ComputePassDescriptor, ComputePipeline, Device, PollType, Queue, util::{BufferInitDescriptor, DeviceExt}};
 
 use crate::wgsl_helpers::{create_bindings_from_arrays, create_compute_pipeline, create_mapped_buffer, create_storage_buffer, request_gpu_resource};
 mod wgsl_helpers;
+
+#[repr(C)]
+#[derive(Copy, Clone, Pod, Zeroable)]
+struct ArrayInfo {
+    array_size_0: u32, // aligned to 16 bytes
+    num_arrays_0: u32, // aligned to 4 bytes
+    _padding: [u8; 8],     // Add 8 bytes of padding
+}
+
 
 fn main() {
     let client: Client = Client::start();
@@ -18,7 +28,7 @@ fn main() {
    
     let staging_buffer = create_mapped_buffer(&device, "Staging buffer", total_size);
     let upload_buffer = create_mapped_buffer(&device, "Upload buffer", total_size); 
-    let pipeline = create_compute_pipeline(&device, "Basic compute", "sort.wgsl", "main");
+    let pipeline = create_compute_pipeline(&device, "Basic compute", "slangsort.wgsl", "main");
 
     upload_buffer.map_async(wgpu::MapMode::Write, .., |_result| {});
     staging_buffer.map_async(wgpu::MapMode::Write, .., |_result| {});
@@ -80,8 +90,13 @@ pub fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &Device, queue: &Queue, s
     let timer = Instant::now(); 
     // Combine uniform data into single buffer to reduce buffer count
     let mut uniform_data = Vec::new();
-    uniform_data.extend_from_slice(bytemuck::bytes_of(&array_size));
-    uniform_data.extend_from_slice(bytemuck::bytes_of(&(num_arrays as u32)));
+    uniform_data.extend_from_slice(bytes_of(&ArrayInfo {
+        array_size_0: array_size,
+        num_arrays_0: num_arrays as u32,
+        _padding: [0,0,0,0,0,0,0,0],
+    }));
+    //uniform_data.extend_from_slice(bytemuck::bytes_of(&array_size));
+    //uniform_data.extend_from_slice(bytemuck::bytes_of(&(num_arrays as u32)));
     
     let uniform_buffer = device.create_buffer_init(&BufferInitDescriptor { 
         label: Some("Uniform buffer"),
@@ -94,7 +109,7 @@ pub fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &Device, queue: &Queue, s
         label: Some("Sort command encoder"),
     });
 
-    encoder.copy_buffer_to_buffer(&upload_buffer, 0, &array_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64); 
+    //encoder.copy_buffer_to_buffer(&upload_buffer, 0, &array_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64); 
     encoder.insert_debug_marker("Before compute pass");
     {
         let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
@@ -103,7 +118,7 @@ pub fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &Device, queue: &Queue, s
         });
         compute_pass.set_pipeline(&pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
-        compute_pass.dispatch_workgroups((num_arrays as u32 + 255) / 256, 1, 1);
+        compute_pass.dispatch_workgroups((num_arrays as u32 + 1023) / 1024, 1, 1);
     }
     encoder.insert_debug_marker("After compute pass");
     // Copy from upload buffer to array buffer, then array buffer to staging buffer
