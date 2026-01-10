@@ -7,7 +7,7 @@ struct ArrayInfo_std140_0
 @binding(1) @group(0) var<uniform> array_info_0 : ArrayInfo_std140_0;
 @binding(0) @group(0) var<storage, read_write> array_buffer_0 : array<u32>;
 
-var<workgroup> local_arrays_0 : array<array<u32, i32(32)>, i32(256)>;
+var<workgroup> local_arrays_0 : array<array<u32, i32(64)>, i32(256)>;
 
 @compute
 @workgroup_size(256, 1, 1)
@@ -33,7 +33,7 @@ fn main(@builtin(global_invocation_id) threadId_0 : vec3<u32>)
         local_arrays_0[thread_id_0][i_0] = array_buffer_0[_S1 + i_0];
         i_0 = i_0 + u32(1);
     }
-    var arr_0 : array<u32, i32(32)> = local_arrays_0[thread_id_0];
+    var arr_0 : array<u32, i32(64)> = local_arrays_0[thread_id_0];
     i_0 = u32(0);
     for(;;)
     {

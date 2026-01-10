@@ -8,7 +8,7 @@ RWStructuredBuffer<uint32_t> array_buffer;   // Global storage buffer (RW)
 ConstantBuffer<ArrayInfo> array_info;        // Constant buffer with array metadata
 
 // Declare shared local memory (1 array per thread in the workgroup)
-groupshared uint local_arrays[256][32]; // Each thread gets a local array of size 32 (for 256 threads)
+groupshared uint local_arrays[256][64]; // Each thread gets a local array of size 32 (for 256 threads)
 
 // The main compute shader function
 [numthreads(256, 1, 1)]  // 256 threads in a workgroup

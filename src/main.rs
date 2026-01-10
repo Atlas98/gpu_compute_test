@@ -20,7 +20,7 @@ struct ArrayInfo {
 fn main() {
     let client: Client = Client::start();
     let (_adapter, device, queue) = block_on(request_gpu_resource());
-    let mut arrays = create_random_arrays(2000000, 32); 
+    let mut arrays = create_random_arrays(1000000, 64); 
 
     // Create persistent staging buffer and upload buffer outside timing
     let total_size = arrays.len() * arrays[0].len() * size_of::<u32>();
