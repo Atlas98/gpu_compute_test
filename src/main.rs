@@ -28,7 +28,7 @@ fn main() {
    
     let staging_buffer = create_mapped_buffer(&device, "Staging buffer", total_size);
     let upload_buffer = create_mapped_buffer(&device, "Upload buffer", total_size); 
-    let pipeline = create_compute_pipeline(&device, "Basic compute", "slangsort.wgsl", "main");
+    let pipeline = create_compute_pipeline(&device, "Basic compute", "bubble.wgsl", "main");
 
     upload_buffer.map_async(wgpu::MapMode::Write, .., |_result| {});
     staging_buffer.map_async(wgpu::MapMode::Write, .., |_result| {});
@@ -109,7 +109,7 @@ pub fn sort_arrays_gpu(arrays: &Vec<Vec<u32>>, device: &Device, queue: &Queue, s
         label: Some("Sort command encoder"),
     });
 
-    //encoder.copy_buffer_to_buffer(&upload_buffer, 0, &array_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64); 
+    encoder.copy_buffer_to_buffer(&upload_buffer, 0, &array_buffer, 0, total_size as u64 * std::mem::size_of::<u32>() as u64); 
     encoder.insert_debug_marker("Before compute pass");
     {
         let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
